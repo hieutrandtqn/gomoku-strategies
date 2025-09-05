@@ -1,0 +1,9 @@
+your task is to create a comprehensive, step-by-step strategy guide for Gomoku.
+
+When moving first, the strategy must guarantee a win if followed correctly.
+
+When moving second, the strategy must guarantee at least a draw, and a win whenever possible.
+
+The strategy must be detailed for every move, explaining the reasoning and possible variations depending on the opponent’s responses.
+
+The output should be structured clearly so it can be used as a reference for building a Gomoku bot with an AI coding assistant."
