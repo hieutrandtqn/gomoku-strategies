@@ -1,9 +1,15 @@
-your task is to create a comprehensive, step-by-step strategy guide for Gomoku.
+Create Gomoku Game unbeatable strategies:
 
-When moving first, the strategy must guarantee a win if followed correctly.
+Definition:
 
-When moving second, the strategy must guarantee at least a draw, and a win whenever possible.
+Board size 15x15, top left (0,0).
 
-The strategy must be detailed for every move, explaining the reasoning and possible variations depending on the opponent’s responses.
+Input:
 
-The output should be structured clearly so it can be used as a reference for building a Gomoku bot with an AI coding assistant."
+- A 2D array [15][15] represent the current board with X and O
+
+- Your player O or X.
+
+Output: - A tuple (row, col) with your move. Example (7,7)
+
+Strategy: Based on our discussion, your task is to create a comprehensive, step-by-step strategy guide for an another AI model can coding to a game bot to play Gomoku. The strategy must guarantee at least a draw, and a win whenever possible. The strategy must be detailed, explaining the reasoning and possible variations depending on the opponent’s responses. The output should be structured clearly so it can be used as a reference for building a Gomoku bot with an AI coding assistant. Not for human
