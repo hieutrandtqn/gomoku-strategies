@@ -1,0 +1,276 @@
+Gomoku Strategy & Bot Reference
+
+(15×15, top-left = (0,0), indices 0..14, center = (7,7))
+X = first player, O = second player.
+
+Meta-note (important & honest): In freestyle Gomoku (no Renju/Swap restrictions) the game is solved: the first player (X) can force a win with perfect play. That means no strategy for O in freestyle can guarantee a draw. I will therefore:
+
+Give a full, implementable strategy that guarantees a win for X (if followed / proven by the bot’s search).
+
+Give O a provably maximal resistance strategy (guarantees best practical defence and wins whenever X makes a mistake).
+
+If you require a guaranteed draw for the second player, switch to a restricted opening rule set (Renju / Swap2); I can provide that separately.
+
+Below is a clear, step-by-step guide and code-level plan you can hand to an AI coding assistant to build a strong Gomoku bot that follows the strategy.
+
+1 — Function interface (exact)
+
+Input:
+
+board: 2D array board[15][15] with values in { 'X', 'O', '.' }.
+
+player: 'X' or 'O' (your side).
+
+Output:
+
+(row, col) integer tuple with 0 <= row,col <= 14.
+
+Example signature (pseudocode):
+
+def choose_move(board: List[List[str]], player: str) -> (int, int):
+    # returns (r,c)
+
+2 — High-level decision priority (what the bot does each move)
+
+Check these in order and take the first applicable:
+
+Immediate win: any move that makes 5 for player → play it.
+
+Block immediate opponent win: any opponent move that would make 5 → block it.
+
+Forced win search (Threat-Space Search): run TSS to detect a forced win sequence from this position for player. If TSS returns a winning move, play the move that leads to the forced win.
+
+Create instant double-threats: play a move that creates a double-four (two distinct 4s) or 3+4 that opponent cannot parry.
+
+Make/upgrade open-4 (4o): create an open-four if it’s safe (immediate forcing).
+
+Make a tempo 4c if it unlocks a perpendicular 3o: play closed-4 only when it buys a guaranteed upgrade elsewhere.
+
+Prevent opponent fork: play junction squares that stop two of opponent’s potential 3o upgrades (kill double-three formation).
+
+Build/maintain two independent 3-threats (3o / b3): scaffold so you can create forks next turns.
+
+Heuristic move: evaluate candidate empties and pick the highest-scoring move (see evaluation).
+
+Fallback: choose central, compact move (closest to center or highest heuristic).
+
+This is the decision tree your bot will implement each turn.
+
+3 — Pattern definitions (what to detect)
+
+Scan 4 base directions per cell: (0,1), (1,0), (1,1), (1,-1). For any empty cell, check the contiguous pattern across up to ±4 cells.
+
+Key patterns (attacker perspective = side-to-move):
+
+5: five in a row → win.
+
+4o (open four): .XXXX. (empty on both ends) — must be answered immediately.
+
+4c (closed four): OXXXX. or .XXXXO (blocked on one end) — often forcing.
+
+3o (open three): .XXX. — highly valuable; two 3o → fork.
+
+b3 (broken three): XX.X or X.XX etc. — can upgrade to 3o in one move.
+
+junction: a cell that, when occupied by defender, spoils two potential upgrades at once.
+
+Your pattern scanner returns for each empty cell a set of pattern tags (for both sides) and the resulting priority.
+
+4 — Threat-Space Search (TSS) — core for “guaranteed win” play
+
+Purpose: exhaustively search forced lines of play composed only of threat/answer moves (3/4/5). TSS proves forced wins far faster than blind minimax.
+
+Principles:
+
+Node types: only consider “threat moves” (cells that create or block 3/4/5 patterns).
+
+Recursion: simulate side plays a threat move → opponent MUST respond to certain forced threats (blocking replies). Continue until either side can make a 5 or no forced moves remain.
+
+Memoize positions (Zobrist hash canonicalized by symmetry).
+
+Bounded: TSS terminates when it finds win/loss or no forced threats. If no forced win found, fall back to heuristic search.
+
+Pseudocode sketch:
+
+def threat_space_search(position, side, visited):
+    if side_has_5(position, side): return WIN
+    if opp_has_5(position, side): return LOSS
+    forced_moves = generate_threat_moves(position, side)
+    if not forced_moves: return UNKNOWN
+    for mv in ordered(forced_moves):
+        newpos = play(position, mv, side)
+        opponent_replies = generate_forced_replies(newpos, other(side))
+        if opponent_replies is empty: 
+            # opponent has no forced answer -> check if immediate win
+            if side_has_5(newpos, side): return WIN
+            continue
+        # assume opponent must pick one reply; we search worst-case reply
+        all_reply_results = []
+        for reply in opponent_replies:
+            res = threat_space_search(play(newpos, reply, other(side)), side, visited)
+            all_reply_results.append(res)
+        if all(res == WIN for res in all_reply_results):
+            return WIN  # side can force win via mv
+    return UNKNOWN
+
+
+Use this TSS from root to find a winning move. If TSS returns WIN for a move, play it — this is how X enforces forced wins.
+
+5 — Candidate generation (efficient)
+
+Primary candidates: all empties with Chebyshev distance ≤ 2 from any existing stone.
+
+Always include any move that is an immediate win or an immediate block.
+
+Include junction cells (cells that appear in two or more opponent pattern threats).
+
+Optionally expand radius to 3 when the board is sparse.
+
+This keeps branching low.
+
+6 — Move ordering & heuristics (used by both TSS and fallback search)
+
+Order moves so the search finds tactical wins quickly:
+
+immediate winning moves.
+
+blocks of opponent winning moves.
+
+moves that create 4o.
+
+moves that create 4c with guaranteed follow-up.
+
+moves that create two distinct 3o (or 3o + 4c).
+
+junction/deadly defensive moves for opponent.
+
+highest heuristic score from evaluation.
+
+Heuristic scoring (example weights — tuneable):
+
+WIN = +1_000_000_000
+
+opponent WIN = -1_000_000_000
+
+my 4o = +100_000
+
+opp 4o = -200_000 (defend harder)
+
+my double-3 = +50_000
+
+my 3o = +5_000
+
+centrality bonus: max(0, 10 - distance_from_center) added
+(Use large gaps between weights so mandatory threats dominate.)
+
+7 — Step-by-step playbook (practical rules for each move)
+
+These are human-readable rules to apply in sequence; they map directly to the decision priority.
+
+If you are X (first player) — goal: force win
+
+Move 1: (7,7) (center).
+
+Moves 2–6 (scaffold): build a primary axis (horizontal or vertical) while planting a perpendicular scaffold. Keep stones within a 3–4 cell radius around center. Always prefer moves that either create a b3 or can be extended to a 3o in 1 move.
+
+When you see a 3o: preserve it and prepare a second b3 on another axis (perpendicular or diagonal). The objective is to have two independent 3o threats (double-three).
+
+If you can make a 4o: do it — it forces an answer and gives tempo to upgrade the other axis.
+
+Use 4c only as a tempo lever: play a closed-four if your opponent must block and that block allows you to create/upgrade a perpendicular 3o.
+
+When double-three exists: convert one into 4o while keeping the other alive → opponent cannot block both → win.
+
+Never play non-forcing slack moves once you enter a forcing cycle — every move should either be a threat or advance a second threat.
+
+Variations depending on O replies: if O blocks early on your primary axis, switch to building the perpendicular scaffold earlier. If O mirrors, break symmetry by playing a move that gives more branching (diagonal pivot).
+
+If you are O (second player) — goal: maximal resistance / win on X errors
+
+Early response to center: respond adjacent to center (7,6),(7,8),(6,7),(8,7) depending on X's secondary placement — contest center lanes.
+
+Always block 4o immediately.
+
+Block 4c unless you can create an immediate stronger counter-threat (a 4o of your own).
+
+Look for junction squares which block two X upgrades at once — play them.
+
+If X builds a 3o: block the endpoints that prevent it becoming 4o, or play a junction that kills both planned forks.
+
+Counter-threats: if a single move both defends and builds an O 3o/4o, prefer it (tempo steal).
+
+Avoid long mirroring — it helps X build symmetric forks. Break symmetry at move ~3–4.
+
+If X makes a non-forcing move: seize the initiative; attempt to form your own 3o and forks.
+
+Variation notes: O cannot guarantee draw; but following these rules makes the forced sequences for X much harder and increases likelihood X will err.
+
+8 — Opening book (tiny canonical set — use symmetry)
+
+These are templates (rotate/reflect equivalently):
+
+X1: (7,7)
+
+If O1 plays adjacent, X2: extend along one axis, e.g., (7,9) (or (9,7)).
+
+If O1 plays one-step away (contest), X2: build opposite side to prepare b3.
+
+Use these 2–4 ply seeds, then let TSS / search take over.
+
+9 — Practical implementation tips & optimizations
+
+Canonicalize by symmetry (8 transforms) before TT lookup to reduce storage.
+
+Bitboard representation (two 225-bit bitsets) accelerates pattern detection.
+
+Precompute masks for sliding window pattern checks of length 9 per direction.
+
+Use iterative deepening for fallback search, but TSS first for tactical positions.
+
+Quiescence: dive until no 3/4 threats remain.
+
+Parallelize TSS if you need speed (search different candidate moves in parallel).
+
+Testing: include self-play using the algorithm to verify X’s forced-win lines show up (many wins will appear if TSS implemented correctly).
+
+10 — Example pseudocode (compact) — returns (r,c)
+def choose_move(board, player):
+    # 1. Immediate win
+    win_moves = find_moves_that_make_5(board, player)
+    if win_moves: return pick_best(win_moves)
+
+    # 2. Block opponent immediate win
+    opp = 'O' if player=='X' else 'X'
+    opp_win = find_moves_that_make_5(board, opp)
+    if opp_win: return pick_best(opp_win)  # block
+
+    # 3. TSS: try to find forced win
+    candidates = generate_candidate_moves(board)
+    for mv in order_by_priority(candidates):
+        if tss_proves_win_after_move(board, mv, player):
+            return mv
+
+    # 4. Tactical moves (double-four, create 3o, etc.)
+    tactical = find_tactical_moves(board, player)
+    if tactical: return pick_best(tactical)
+
+    # 5. Defensive junctions if opponent building fork
+    junction = find_junction_blocks(board, player)
+    if junction: return pick_best(junction)
+
+    # 6. Heuristic fallback
+    candidate = best_by_heuristic(board, player, candidates)
+    if candidate: return candidate
+
+    # 7. Random safe fallback (closest to center)
+    return fallback_center_move(board)
+
+11 — What this guarantees (recap)
+
+If your bot fully implements TSS + candidate generation + exact pattern detection, then:
+
+As X it can find and execute the forced-win lines — a win is guaranteed (in principle) if the search is correct and exact.
+
+As O it cannot guarantee a draw in freestyle Gomoku; this guide gives the best defence policy that maximizes resistance and wins if X slips.
+
+If your requirement is that both players have a draw guarantee, switch to Renju or adopt an opening rule (Swap2) — I can convert the bot and strategy to those rules on request.
