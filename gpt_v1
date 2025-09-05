@@ -1,0 +1,451 @@
+Gomoku Strategy Playbook (for Humans & Bots)
+
+Scope: Freestyle Gomoku on 15×15+ boards (rules: any 5+ in a row wins; no restrictions).
+Fact you must know: freestyle is a first-player win with perfect play. That means:
+
+As Black (first): A forced win exists. This guide shows you how to play for that result systematically.
+
+As White (second): A guaranteed draw does not exist under freestyle. This guide gives you a max-resistance, mistake-punishing defense that converts to wins when Black slips.
+If you require a theoretical draw guarantee as White, use Renju/Swap2 opening rules (outside the scope of freestyle).
+
+0) Notation, Primitives, and Pattern Glossary
+
+Board coordinates
+
+Use 0-indexed Cartesian: center is (0,0); right is +x; up is +y. Symmetry handling becomes trivial in code.
+
+Symbols
+
+B = Black stone; W = White stone; . = empty.
+
+Directions D ∈ {→, ←, ↑, ↓, ↗, ↘, ↖, ↙} as (dx,dy) unit vectors.
+
+Threat patterns (attacker’s perspective)
+
+5: five in a row → win.
+
+4o (open four): ._BBBB_. → win next unless blocked immediately.
+
+4c (closed four): one end blocked (e.g., WBBBB. or .BBBBW) → still forcing (must answer).
+
+3o (open three): ._BBB_. → if unaddressed, upgrades to 4o; two concurrent 3o is lethal (fork).
+
+3c (closed three): blocked on one side (e.g., WBBB_.) → weaker but still useful in forcing chains.
+
+b3 (broken three): discontinuous 3 that becomes 3o in one move (e.g., ._BB.B_.) → valuable as a pre-threat.
+
+2+ (potential): shapes that become b3/3o in one move; use as scaffolding.
+
+Priority of responses (defender’s perspective)
+
+Block 5 (obvious).
+
+Block 4o.
+
+Answer 4c (usually).
+
+Defuse double-threat creation (two 3o, or 3o+4c).
+
+Prevent upgrades from b3 → 3o when it also creates a fork.
+
+1) Core Ideas You’ll Use Everywhere
+
+Tempo: Play forcing moves so the opponent has only one reply; chain these until a fork (two wins) appears.
+
+Forks: The decisive motifs are double-three (two 3o) and double-four (two 4 threats).
+
+Threat-Space Search (TSS): Limit calculation to moves that create/answer threats (3/4/5). This is how engines prove wins efficiently.
+
+Zone of Relevance: Generate moves within distance ≤2 from existing stones (expands if board is sparse).
+
+Symmetry: Treat rotations/reflections as identical; hash canonicalized positions.
+
+2) Black (First Player) — Forced-Win Framework
+Phase A — Opening Scaffold (Moves 1–5)
+
+A1. B1: Place at center (0,0).
+A2. Expand on two orthogonal axes to prepare multi-line potential (keep stones within radius 2–3).
+
+Heuristic: aim to create at least one b3 in two directions by move 4.
+
+Avoid early edges/corners; center maximizes branching.
+
+A3. If W mirrors or plays nearby, stay central and build toward the first 3o:
+
+Template aim by ~move 5: one line with ._BBB_. or a position that becomes 3o in one move while you also threaten another line.
+
+Bot rule (opening):
+
+if can_make_3o(): do it
+else create b3 that also prepares a perpendicular b3
+ensure every move either (i) builds the first 3o, or (ii) prepares a backup b3 in another direction
+
+Phase B — First Forcing Cycle (Moves 6–12)
+
+Goal: Convert first 3o → 4 forcing sequence while seeding a second 3o elsewhere.
+
+B1. Make/maintain a 3o.
+
+If W ignores → upgrade to 4o → win next.
+
+If W blocks at one end (turning it 3c), you play to:
+
+either restore 3o (extending opposite end),
+
+or drop a new b3/3o on a perpendicular line.
+
+B2. Create a 4c forcing move when it grants a free tempo to build the second 3o:
+
+Pattern idea:
+
+(line D1): W BBBB .
+           ^--- 4c (forcing)
+
+
+While W is compelled to block the open end, your next move upgrades your perpendicular b3 → 3o.
+
+B3. After W answers your 4c, you now have:
+
+Existing pressure on D1 (often still dangerous), plus
+
+A fresh 3o on D2. Continue:
+
+B4. Force to a fork:
+
+From the D2 3o, play the move that simultaneously:
+
+upgrades it toward 4, and
+
+revives pressure on D1 (often by forming another 3o there).
+
+Within 1–3 forcing plies you should reach double-three or 3+4 fork, then double-four.
+
+Bot rule (forcing cycle):
+
+loop:
+  if immediate 5: play and win
+  elif any 4o: play it (forces single reply); then search fork
+  elif can create 4c that compels a reply AND unlocks 3o elsewhere next: do it
+  else create second 3o (or b3->3o) on perpendicular
+  if two concurrent 3o exist: next move aims at double-four
+
+Phase C — Converting the Fork (Moves 10–20)
+
+C1. Double-three present?
+
+Play the intersection that converts either 3o into 4o while leaving the other 3o alive → W can block only one line → you win next.
+
+C2. 3+4 fork?
+
+If you have a 4c/4o on one line and 3o on another, make 4o on the 3o line. W must block; you finish on the 4 line.
+
+C3. Double-four?
+
+If you can place a move creating two distinct 4s, you win next no matter what W does.
+
+Safety invariant for Black:
+
+Never play a non-forcing move once you’ve started a forcing cycle.
+
+If a move isn’t (i) 5, (ii) 4o, (iii) 4c with a follow-up unlock, or (iv) creating a second 3o, don’t play it.
+
+3) White (Second Player) — Maximum-Resistance Defense
+
+Reminder: In freestyle, White cannot force a draw versus perfect Black. Your goal is to break forcing chains, avoid symmetrical traps, and counter-threat whenever safely possible to push Black off the “proven” path and win on errors.
+
+Phase D — Early Neutralization (Moves 1–6)
+
+D1. Contest the center immediately (adjacent to Black’s first stone).
+D2. Mirror carefully for 1–2 moves max, then break symmetry (mirroring too long gives Black an easy fork framework).
+D3. Deny open threes:
+
+When Black threatens to form ._BBB_., pre-block one end to enforce 3c, ideally at a square that also prevents perpendicular scaffolding.
+
+Bot rule (early defense):
+
+if B can form 3o in 1 move: pre-block the most central end that also kills perpendicular b3
+else place a central stone that intersects the highest number of B's growth lines
+
+Phase E — Breaking Forcing Chains (Moves 7–15)
+
+E1. Versus 4o: Always block the win point.
+E2. Versus 4c: Usually block the open end, unless you have a strong counter-threat (your own 4o) that forces Black to answer you first.
+**E3. Prevent double-three:
+
+If Black has one 3o, block the intersection that also prevents the second 3o (look for “junction” squares that kill both directions).
+
+If two 3o are inevitable, prefer a block that transforms one into 3c and reduces the other to b3.
+
+E4. Counter-threat when safe:
+
+If a single move can both (i) block Black’s threat and (ii) create your own 4o or 3o, pick it—this steals tempo.
+
+E5. Avoid self-traps:
+
+Don’t place blocks that assist Black in forming a 4c with tempo.
+
+Avoid giving Black a “build-while-you-block” square.
+
+Bot rule (threat trade):
+
+if must-answer by you and must-answer by Black both exist:
+   prefer moves that satisfy your defense and create a new must-answer for Black
+else:
+   prioritize killing fork creation (two 3o) over neutralizing a single 3c
+
+Phase F — Turning Defense into Attack (Moves 15+)
+
+F1. As Black’s pressure dilutes (after you break a forcing cycle), immediately claim center lanes and build your own 3o.
+F2. Prefer asymmetric forks (diagonal + orthogonal), harder for Black to parry simultaneously.
+F3. If Black overextends on one flank, counter on the opposite flank to race to first 4o.
+
+4) Common Local Templates (with Explanations)
+
+Below, x is the target move.
+
+T1. Grow 3o then fork (Black)
+Line D1:   . B B . B .
+Goal:      . B B B B .   (play x = fill the gap)
+Result:    4o forcing; while W answers, prepare a 3o on D2
+
+
+If W plays at either end first, you play the other end → 3o restored.
+
+Next, create b3/3o on D2, aim for two 3o.
+
+T2. 4c as a tempo lever (Black)
+W B B B B .
+^           x here makes 4c
+
+
+W must fill the open end → you immediately upgrade your prepared b3 on D2 to 3o, heading to fork.
+
+T3. Junction block (White)
+Black threats on D1 and D2 share a junction ‘x’:
+   D2
+   |
+---x---  D1
+   |
+
+
+Playing x often kills both upgrades (turns potential 3o into 3c or b3). Always search for shared junctions.
+
+T4. Counter-threat block (White)
+Before: Black threatens 4o at p
+Move:   White plays q that both prevents p and creates own 4o
+Outcome: Black must answer White now (tempo stolen)
+
+5) Endgame Conversions
+
+Black
+
+Once a fork is available, pick the line that maximizes disjoint win points (so a single White block can’t parry both).
+
+Prefer double-four over double-three if both exist; it gives immediate mate-in-1 next.
+
+White
+
+In late defense, count liberties of each line (empty endpoints). Always block the line with fewest remaining parries (usually 4o).
+
+If multiple 4o are looming, block the one that also removes opponent’s ability to create another 4o next turn (look for “bridge” points).
+
+6) Implementation Guide (for a Strong Bot)
+A. Search Framework
+
+Two modes:
+
+Threat-Space Search (TSS) when any 3/4/5 exists (fast, proof-oriented).
+
+MTD(f)/Negamax with iterative deepening in quiet positions; horizon guarded by quiescence that dives until no 3/4 exist.
+
+Move ordering (critical):
+
+Immediate 5
+
+Create 4o / block 4o
+
+Create 4c / block 4c (only those with clean follow-ups)
+
+Create second 3o (fork potential)
+
+Upgrade b3 → 3o; kill opponent b3 → 3o upgrades
+
+Other central tightening moves
+
+Pruning & acceleration:
+
+Transposition table (Zobrist hashing on 8 symmetries → store canonical form).
+
+Killer moves/History heuristic.
+
+Null-move only outside TSS (avoid zugzwang artifacts).
+
+Selective generator: only cells within Chebyshev distance ≤2 from any stone, except immediate tactical replies.
+
+B. Pattern Detector (bitboard-friendly)
+
+Maintain 8 directional bitboards per side or 4 with both directions.
+
+Precompute masks to scan for: 5, 4o, 4c, 3o, 3c, b3.
+
+Return:
+
+list of must-answer opponent threats
+
+list of winning moves for side-to-move
+
+set of junction cells (shared upgrades)
+
+C. Evaluation (quiet nodes)
+
+Score = weighted sum of pattern counts with side-to-move bonus:
+
+score =  + INF * (#my5)
+         - INF * (#opp5)
+         + M4O  * (#my4o)  - O4O * (#opp4o)
+         + M4C  * (#my4c)  - O4C * (#opp4c)
+         + M3O  * (#my3o)  - O3O * (#opp3o)
+         + M3C  * (#my3c)  - O3C * (#opp3c)
+         + MB3  * (#myb3)  - OB3 * (#oppb3)
+         + CENTER * (centrality delta)
+
+
+Use asymmetric weights (defending a 4o is mandatory; overvalue opponent’s threats to avoid “pretty but losing” lines).
+
+Add fork bonuses when two threats are independent (disjoint win points).
+
+D. Tactical Policy (must be hard-coded)
+
+If opponent has 4o: block it first, unless you can place 5 immediately.
+
+If you can make double-four now → do it.
+
+If you can create two 3o with one move → do it (and mark the node as winning in TSS).
+
+When answering 4c, prefer blocks that also remove opponent’s ability to restore 3o elsewhere (junction preference).
+
+E. Opening Book (practical)
+
+Seed a small center-focused book (first 4–6 plies) with human-curated lines that:
+
+build early b3/3o on orthogonal axes (for Black),
+
+deny standard central forks and keep junction squares under White’s control (for White).
+
+After book exits, fall back to TSS/ID search.
+
+7) Step-By-Step Reference Trees (Templates)
+
+(Coordinates are relative; rotate/reflect as needed.)
+
+Black Tree B-1: Linear-to-Perpendicular Fork
+
+B: (0,0)
+
+W: any central adjacent
+
+B: (1,0) — start line D1
+
+W: contest near (2,0) or (−1,0)
+
+B: (2,0) — threatens to form 3o next at (−1,0) or (3,0) depending on W
+
+If W blocks end → 3c appears.
+
+B: place b3 on D2, e.g., (0,1).
+
+If W ignores D2:
+
+B: upgrade b3→3o on D2.
+
+W blocks D2 end →
+
+B: make 4c on D1 (forcing).
+
+W answers →
+
+B: restore 3o on D2 (or create second 3o) → double-three imminent.
+
+W can block one line →
+
+B: create double-four → win next.
+
+Black Tree B-2: Diagonal-Orthogonal Cross
+
+B: (0,0)
+
+W: nearby
+
+B: (1,1)
+
+W: nearby
+
+B: (2,2) — diagonal scaffold
+
+W: blocks diagonal end
+
+B: (1,0) — orthogonal pivot → creates b3 both directions
+
+W: parries one axis
+
+B: upgrade b3→3o on the other axis
+
+W: block end
+
+B: 4c on diagonal (forcing)
+
+W: answers
+
+B: 3o maintained orthogonally → fork → convert to double-four.
+
+White Tree W-1: Anti-Fork Central Net
+
+B: (0,0)
+
+W: (1,0)
+
+B: (0,1)
+
+W: (1,1) — maintain contact, prevent perpendicular b3
+
+B: tries to elongate a line
+
+W: play junction that denies 3o on one axis and b3 on the other (often the “gap” between Black’s two stones)
+
+B: attempts 4c
+
+W: block mandatory end unless you can make your 4o (rare but decisive)
+
+Transition: as soon as a forcing cycle breaks, claim center lanes and build your own 3o.
+
+8) Practical Checklist (Fast Reference)
+
+As Black
+
+ First move center; stay central until a live threat exists.
+
+ Build one 3o and one b3 on different axes.
+
+ Use 4c only when it buys time to upgrade the other axis.
+
+ Aim for double-three → double-four → 5.
+
+ Never play a non-forcing move once the cycle starts.
+
+As White
+
+ Block 4o instantly; usually answer 4c.
+
+ Break double-three attempts at the junction square.
+
+ Prefer blocks that also kill perpendicular upgrades.
+
+ Counter-threat only when it also completes your defense.
+
+ After defusing, seize center and build your own 3o.
+
+9) What This Guarantees (and What It Doesn’t)
+
+Black: The plan operationalizes the known forced-win via threat-space play: if you follow the forcing policy and your search proves forks correctly, you will force a win.
+
+White: In freestyle, no perfect draw guarantee exists. The defense above maximally resists, breaks forcing chains often, and wins on inaccuracies.
